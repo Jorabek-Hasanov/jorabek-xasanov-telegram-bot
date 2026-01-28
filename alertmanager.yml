@@ -1,0 +1,65 @@
+# ============================================================================
+# Alertmanager Configuration
+# ============================================================================
+# Alert routing and notification configuration for the Telegram Bot
+# ============================================================================
+
+global:
+  resolve_timeout: 5m
+  http_config:
+    tls_config:
+      insecure_skip_verify: true
+
+# Route alerts to appropriate receivers
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'telegram_alerts'
+  routes:
+    # Critical alerts - send immediately
+    - match:
+        severity: critical
+      receiver: 'telegram_alerts'
+      group_wait: 0s
+      repeat_interval: 1h
+    
+    # Warning alerts - group with other warnings
+    - match:
+        severity: warning
+      receiver: 'telegram_alerts'
+      group_wait: 2m
+      group_interval: 10m
+    
+    # Info alerts - less urgent
+    - match:
+        severity: info
+      receiver: 'telegram_alerts'
+      group_wait: 5m
+
+# Inhibition rules for noise reduction
+inhibit_rules:
+  # Suppress low disk space alerts if high CPU is already firing
+  - source_match:
+      alertname: 'HighCPUUsage'
+    target_match:
+      alertname: 'HighDiskUsage'
+    equal: ['instance']
+  # Critical alerts suppress warning alerts
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+# Receivers for notifications
+receivers:
+  - name: 'telegram_alerts'
+    webhook_configs:
+      - url: 'http://bot:8080/alerts'
+        send_resolved: true
+        timeout: 10s
+
+  - name: 'null'
+    # Do nothing with alerts

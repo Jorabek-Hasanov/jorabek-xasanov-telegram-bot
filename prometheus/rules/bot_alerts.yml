@@ -1,0 +1,100 @@
+# ============================================================================
+# Prometheus Alert Rules
+# ============================================================================
+# Alert rules for the Telegram Bot infrastructure
+# ============================================================================
+
+groups:
+  - name: jorabek_bot_alerts
+    rules:
+      # High error rate alert
+      - alert: HighErrorRate
+        expr: bot_error_rate_percent > 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Bot error rate is {{ $value }}% for the last minute"
+
+      # Critical error rate alert
+      - alert: CriticalErrorRate
+        expr: bot_error_rate_percent > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical error rate detected"
+          description: "Bot error rate is {{ $value }}% - immediate attention required"
+
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: bot_cpu_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}%"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: bot_memory_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value }}%"
+
+      # High disk usage
+      - alert: HighDiskUsage
+        expr: bot_disk_percent > 90
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High disk usage"
+          description: "Disk usage is {{ $value }}%"
+
+      # High latency alert
+      - alert: HighLatency
+        expr: bot_p95_latency_ms > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High P95 latency"
+          description: "P95 latency is {{ $value }}ms"
+
+      # Low cache hit rate
+      - alert: LowCacheHitRate
+        expr: bot_cache_hit_rate_percent < 10
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value }}%"
+
+  - name: jorabek_bot_health
+    rules:
+      # Bot is down (no requests in 5 minutes)
+      - alert: BotDown
+        expr: increase(bot_requests_total[5m]) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bot appears to be down"
+          description: "No requests received in the last 5 minutes"
+
+      # High request rate (potential attack)
+      - alert: HighRequestRate
+        expr: rate(bot_requests_total[1m]) > 100
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusually high request rate"
+          description: "Request rate is {{ $value }}/second"

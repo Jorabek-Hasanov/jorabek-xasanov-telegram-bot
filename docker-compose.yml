@@ -1,0 +1,297 @@
+# ============================================================================
+# DOCKER COMPOSE - Production Infrastructure
+# ============================================================================
+# Comprehensive multi-service deployment with healthchecks and monitoring
+# ============================================================================
+
+services:
+  # ==========================================================================
+  # Telegram Bot Service
+  # ==========================================================================
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jorabek_bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-bot_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secure_password}
+      - POSTGRES_DB=${POSTGRES_DB:-bot_db}
+      - AI_MODEL=llama-3.3-70b-versatile
+      - AI_TEMPERATURE=0.72
+      - AI_MAX_TOKENS=4096
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SECURITY_ENCRYPTION_KEY=${SECURITY_ENCRYPTION_KEY:-}
+      - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-0}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend_internal_network
+    volumes:
+      - bot_logs:/app/logs
+      - bot_uploads:/app/uploads
+    cpu_shares: 512
+    mem_limit: 1g
+    memswap_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ==========================================================================
+  # Redis Cache Service (v7.2+)
+  # ==========================================================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: jorabek_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - backend_internal_network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    cpu_shares: 256
+    mem_limit: 256m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ==========================================================================
+  # PostgreSQL Database Service (v16+)
+  # ==========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: jorabek_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-bot_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secure_password}
+      - POSTGRES_DB=${POSTGRES_DB:-bot_db}
+    networks:
+      - backend_internal_network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bot_user} -d ${POSTGRES_DB:-bot_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    cpu_shares: 512
+    mem_limit: 512m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ==========================================================================
+  # pgAdmin - PostgreSQL Admin Interface
+  # ==========================================================================
+  pgadmin:
+    image: dpage/pgadmin8:latest
+    container_name: jorabek_pgadmin
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@jorabek.local
+      - PGADMIN_DEFAULT_PASSWORD=admin_password_change_in_production
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    networks:
+      - backend_internal_network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - pgadmin_sessions:/var/lib/pgadmin/sessions
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cpu_shares: 256
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/misc/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
+  # Redis Commander - Redis Admin Interface
+  # ==========================================================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: jorabek_redis_commander
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin_password_change_in_production
+    networks:
+      - backend_internal_network
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    cpu_shares: 256
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
+  # Prometheus - Metrics Collection
+  # ==========================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: jorabek_prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    networks:
+      - backend_internal_network
+    volumes:
+      - prometheus_data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - bot
+    cpu_shares: 256
+    mem_limit: 512m
+
+  # ==========================================================================
+  # Node Exporter - System Metrics
+  # ==========================================================================
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: jorabek_node_exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/.)'
+    networks:
+      - backend_internal_network
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    cpu_shares: 128
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
+  # Grafana - Metrics Visualization
+  # ==========================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: jorabek_grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin_password_change_in_production
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - backend_internal_network
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    cpu_shares: 256
+    mem_limit: 256m
+
+  # ==========================================================================
+  # Alertmanager - Alert Routing
+  # ==========================================================================
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: jorabek_alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - backend_internal_network
+    volumes:
+      - alertmanager_data:/alertmanager
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    depends_on:
+      - prometheus
+    cpu_shares: 128
+    mem_limit: 128m
+
+# ============================================================================
+# VOLUMES (Data Persistence)
+# ============================================================================
+volumes:
+  bot_logs:
+    driver: local
+  bot_uploads:
+    driver: local
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  pgadmin_sessions:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  postgres_init:
+    driver: local
+
+# ============================================================================
+# NETWORKS (Security Isolation)
+# ============================================================================
+networks:
+  backend_internal_network:
+    driver: bridge
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

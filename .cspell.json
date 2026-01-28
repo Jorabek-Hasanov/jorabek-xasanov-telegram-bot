@@ -1,0 +1,19 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "Xasanov",
+    "Jorabek",
+    "aiogram",
+    "ingram",
+    "genai",
+    "Gemini",
+    "usecwd"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/.env",
+    "**/vena/**"
+  ]
+}
