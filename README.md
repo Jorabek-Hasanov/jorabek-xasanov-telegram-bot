@@ -15,8 +15,3 @@ This is a professional, 10-layer architecture Telegram bot designed as a Digital
 - **Multi-Tenant:** Supports thousands of concurrent users with isolated sessions.
 - **Cyber-Defense:** Shield middleware against Prompt Injection.
 - **Observability:** Live metrics at Port 3000 (Grafana).
-
-## 🚀 Quick Start
-1. Clone the repo: `git clone [link]`
-2. Create `.env` from `.env.example`.
-3. Run: `docker-compose up -d --build`
